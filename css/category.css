@@ -48,6 +48,44 @@
   color: var(--muted);
 }
 
+.group-form {
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) 120px;
+  grid-template-areas:
+    "name tel save"
+    "homepage homepage save"
+    "error error error"
+    "cancel cancel cancel";
+  align-items: stretch;
+}
+
+.group-name-field {
+  grid-area: name;
+}
+
+.group-tel-field {
+  grid-area: tel;
+}
+
+.group-homepage-field {
+  grid-area: homepage;
+}
+
+#saveGroupBtn {
+  grid-area: save;
+  align-self: stretch;
+  min-width: 120px;
+  font-size: 18px;
+}
+
+#cancelGroupEditBtn {
+  grid-area: cancel;
+  justify-self: end;
+}
+
+.group-form .form-error {
+  grid-area: error;
+}
+
 @media (max-width: 1200px) {
   .toolbar {
     grid-template-columns: minmax(260px, 1fr) repeat(3, 140px);
@@ -57,6 +95,25 @@
 @media (max-width: 760px) {
   .toolbar {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .group-form {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "name"
+      "tel"
+      "homepage"
+      "save"
+      "cancel"
+      "error";
+  }
+
+  #saveGroupBtn {
+    min-height: 50px;
+  }
+
+  #cancelGroupEditBtn {
+    justify-self: stretch;
   }
 }
 
