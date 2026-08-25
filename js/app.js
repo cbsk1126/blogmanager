@@ -8,6 +8,14 @@ const $ = (selector) => document.querySelector(selector);
 const state = { records: [], groups: [], deleteId: null, currentPage: 1, firebase: null, auth: null, databaseStarted: false, databaseUnsubscribes: [] };
 const isConfigured = () => firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("YOUR_");
 const escapeHtml = (value = "") => String(value).replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+const normalizeHomepage = (value = "") => {
+  const raw = String(value).trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return ["http:", "https:"].includes(url.protocol) ? url.href : null;
+  } catch { return null; }
+};
 const formatDate = (value, withTime = false) => value ? new Intl.DateTimeFormat("ko-KR", { year:"numeric", month:"2-digit", day:"2-digit", ...(withTime ? {hour:"2-digit", minute:"2-digit"} : {}) }).format(new Date(value)) : "-";
 const statusClass = status => ({관심매장:"interest", 사용대기:"waiting", 사용중:"using", 사용완료:"completed"}[status] || "interest");
 
@@ -57,7 +65,16 @@ async function removeGroup(id) {
   await state.firebase.remove(state.firebase.ref(state.firebase.db, `${GROUP_COLLECTION}/${id}`));
 }
 
-const groupName = id => state.groups.find(group => group.idx === id)?.testerGroupName || "미지정";
+const groupById = id => state.groups.find(group => group.idx === id);
+const groupName = id => groupById(id)?.testerGroupName || "미지정";
+const groupHomepage = id => normalizeHomepage(groupById(id)?.homepage) || "";
+const groupBadge = id => {
+  const name = escapeHtml(groupName(id));
+  const homepage = groupHomepage(id);
+  return homepage
+    ? `<a class="group-badge group-badge-link" href="${escapeHtml(homepage)}" target="_blank" rel="noopener noreferrer" title="${name} 홈페이지 열기">${name}</a>`
+    : `<span class="group-badge">${name}</span>`;
+};
 
 function renderGroupOptions() {
   const options = state.groups.map(group => `<option value="${group.idx}">${escapeHtml(group.testerGroupName)}</option>`).join("");
@@ -71,7 +88,13 @@ function renderGroupOptions() {
 
 function renderGroupList() {
   $("#groupCount").textContent = `${state.groups.length}개`;
-  $("#groupList").innerHTML = state.groups.length ? state.groups.map(group => `<article class="group-item"><div><strong>${escapeHtml(group.testerGroupName)}</strong><span>${escapeHtml(group.testerGroupTel || "연락처 미등록")}</span></div><div class="row-actions"><button data-group-edit="${group.idx}">수정</button><button class="delete" data-group-delete="${group.idx}">삭제</button></div></article>`).join("") : `<div class="group-empty">등록된 체험단 분류가 없습니다.</div>`;
+  $("#groupList").innerHTML = state.groups.length ? state.groups.map(group => {
+    const homepage = normalizeHomepage(group.homepage);
+    const homepageMarkup = homepage
+      ? `<a class="group-homepage" href="${escapeHtml(homepage)}" target="_blank" rel="noopener noreferrer">${escapeHtml(homepage)}</a>`
+      : `<span class="group-homepage-empty">홈페이지 미등록</span>`;
+    return `<article class="group-item"><div><strong>${escapeHtml(group.testerGroupName)}</strong><span>${escapeHtml(group.testerGroupTel || "연락처 미등록")}</span>${homepageMarkup}</div><div class="row-actions"><button data-group-edit="${group.idx}">수정</button><button class="delete" data-group-delete="${group.idx}">삭제</button></div></article>`;
+  }).join("") : `<div class="group-empty">등록된 체험단 분류가 없습니다.</div>`;
 }
 
 function filteredRecords() {
@@ -110,7 +133,7 @@ function render() {
   $("#completedCount").textContent = state.records.filter(x => x.usageStatus === "사용완료").length;
   $("#resultText").textContent = `총 ${allRows.length}개의 매장 · ${state.currentPage}페이지`; $("#emptyState").hidden = allRows.length !== 0;
   $("#campaignTableBody").innerHTML = rows.map(row => `<tr>
-    <td><span class="group-badge">${escapeHtml(groupName(row.testerGroupId))}</span></td><td><span class="category-badge">${escapeHtml(row.category || "미지정")}</span></td><td><div class="shop-cell"><strong>${escapeHtml(row.shopName)}</strong><span>${escapeHtml(row.area || "지역 미입력")}</span><small>${escapeHtml(row.address || "주소 미입력")}</small>${row.memo ? `<small class="memo-preview" title="${escapeHtml(row.memo)}">메모: ${escapeHtml(row.memo)}</small>` : ""}</div></td>
+    <td>${groupBadge(row.testerGroupId)}</td><td><span class="category-badge">${escapeHtml(row.category || "미지정")}</span></td><td><div class="shop-cell"><strong>${escapeHtml(row.shopName)}</strong><span>${escapeHtml(row.area || "지역 미입력")}</span><small>${escapeHtml(row.address || "주소 미입력")}</small>${row.memo ? `<small class="memo-preview" title="${escapeHtml(row.memo)}">메모: ${escapeHtml(row.memo)}</small>` : ""}</div></td>
     <td><span class="part-badge">${escapeHtml(row.part)}</span></td><td class="food-cell">${escapeHtml(row.food || "-")}</td>
     <td>${formatDate(row.visitLastDay)}</td><td>${formatDate(row.visitDateTime, true)}</td>
     <td><select class="status-select ${statusClass(row.usageStatus)}" data-status-id="${row.idx}" aria-label="${escapeHtml(row.shopName)} 상태 변경"><option ${row.usageStatus==='관심매장'?'selected':''}>관심매장</option><option ${row.usageStatus==='사용대기'?'selected':''}>사용대기</option><option ${row.usageStatus==='사용중'?'selected':''}>사용중</option><option ${row.usageStatus==='사용완료'?'selected':''}>사용완료</option></select></td>
@@ -151,17 +174,19 @@ $("#pagination").addEventListener("click", event => { const page=Number(event.ta
 $("#groupForm").addEventListener("submit", async event => {
   event.preventDefault();
   const id=$("#groupRecordId").value, name=$("#testerGroupName").value.trim(), tel=$("#testerGroupTel").value.trim();
+  const homepageInput=$("#testerGroupHomepage").value.trim(), homepage=normalizeHomepage(homepageInput);
   if (!name) { $("#groupFormError").textContent="체험단 이름은 필수입니다."; return; }
+  if (homepageInput && !homepage) { $("#groupFormError").textContent="홈페이지 주소를 확인해 주세요. http 또는 https 주소만 사용할 수 있습니다."; return; }
   if (state.groups.some(group => group.testerGroupName.toLowerCase() === name.toLowerCase() && group.idx !== id)) { $("#groupFormError").textContent="이미 등록된 체험단 이름입니다."; return; }
   const existing=state.groups.find(group => group.idx===id); const now=new Date().toISOString();
   const button=$("#saveGroupBtn"); button.disabled=true;
-  try { await persistGroup({testerGroupName:name, testerGroupTel:tel, createdAt:existing?.createdAt || now, updatedAt:now}, id); resetGroupForm(); toast(id ? "체험단 분류가 수정되었습니다." : "체험단 분류가 등록되었습니다."); }
+  try { await persistGroup({testerGroupName:name, testerGroupTel:tel, homepage, createdAt:existing?.createdAt || now, updatedAt:now}, id); resetGroupForm(); toast(id ? "체험단 분류가 수정되었습니다." : "체험단 분류가 등록되었습니다."); }
   catch(error) { showError(error); } finally { button.disabled=false; }
 });
 $("#cancelGroupEditBtn").addEventListener("click", resetGroupForm);
 $("#groupList").addEventListener("click", async event => {
   const editId=event.target.dataset.groupEdit, deleteId=event.target.dataset.groupDelete;
-  if (editId) { const group=state.groups.find(item=>item.idx===editId); $("#groupRecordId").value=group.idx; $("#testerGroupName").value=group.testerGroupName || ""; $("#testerGroupTel").value=group.testerGroupTel || ""; $("#saveGroupBtn").textContent="수정하기"; $("#cancelGroupEditBtn").hidden=false; $("#testerGroupName").focus(); }
+  if (editId) { const group=state.groups.find(item=>item.idx===editId); $("#groupRecordId").value=group.idx; $("#testerGroupName").value=group.testerGroupName || ""; $("#testerGroupTel").value=group.testerGroupTel || ""; $("#testerGroupHomepage").value=group.homepage || ""; $("#saveGroupBtn").textContent="수정하기"; $("#cancelGroupEditBtn").hidden=false; $("#testerGroupName").focus(); }
   if (deleteId && confirm("이 체험단 분류를 삭제할까요?")) { try { await removeGroup(deleteId); toast("체험단 분류가 삭제되었습니다."); } catch(error) { if (error.message === "GROUP_IN_USE") toast("등록된 매장에서 사용 중인 체험단은 삭제할 수 없습니다."); else showError(error); } }
 });
 $("#campaignTableBody").addEventListener("click", event => {
